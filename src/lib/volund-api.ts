@@ -114,6 +114,29 @@ export interface ProviderCredential {
   stored_at: string;
 }
 
+export interface AvailableSkill {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  type: string;
+  tags: string[];
+  enabled: boolean;
+  required_providers: string[];
+  created_at: string;
+}
+
+export interface ConnectionProvider {
+  id: string;
+  display_name: string;
+  category: string;
+  icon_url: string;
+  scopes: string[];
+  connected: boolean;
+  connect_url: string;
+}
+
 export interface CredentialAuditEntry {
   id: string;
   tenant_id: string;
@@ -497,6 +520,71 @@ class VolundAPI {
     });
     if (!res.ok) throw new Error("Failed to get forge skill");
     return res.json();
+  }
+
+  // ── Skill Activation ───────────────────────────────────────────────────────
+
+  async listAvailableSkills(): Promise<AvailableSkill[]> {
+    const res = await fetch(`${BASE_URL}/v1/skills`, {
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error("Failed to list available skills");
+    const data = await res.json();
+    return data.skills ?? [];
+  }
+
+  async enableSkill(skillId: string): Promise<void> {
+    const res = await fetch(`${BASE_URL}/v1/skills/${skillId}/enable`, {
+      method: "POST",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error("Failed to enable skill");
+  }
+
+  async disableSkill(skillId: string): Promise<void> {
+    const res = await fetch(`${BASE_URL}/v1/skills/${skillId}/enable`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error("Failed to disable skill");
+  }
+
+  async installSkill(skillId: string): Promise<void> {
+    const res = await fetch(`${BASE_URL}/v1/admin/skills/${skillId}/install`, {
+      method: "POST",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error("Failed to install skill");
+  }
+
+  async uninstallSkill(skillId: string): Promise<void> {
+    const res = await fetch(`${BASE_URL}/v1/admin/skills/${skillId}/install`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error("Failed to uninstall skill");
+  }
+
+  // ── Connections (OAuth provider connect flow) ─────────────────────────────
+
+  async listConnections(): Promise<ConnectionProvider[]> {
+    const res = await fetch(`${BASE_URL}/v1/connect`, {
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error("Failed to list connections");
+    const data = await res.json();
+    return data.providers ?? [];
+  }
+
+  /** Returns the OAuth authorization URL for the provider. The desktop app
+   *  should open this in the system browser so the user can consent. */
+  async getConnectUrl(provider: string): Promise<string> {
+    const res = await fetch(`${BASE_URL}/v1/connect/${provider}?format=json`, {
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error("Failed to get connect URL");
+    const data = await res.json();
+    return data.auth_url;
   }
 
   // ── Credentials ────────────────────────────────────────────────────────────

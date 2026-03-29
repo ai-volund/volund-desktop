@@ -3,6 +3,8 @@ import {
   api,
   type ProviderCredential,
   type CredentialAuditEntry,
+  type ConnectionProvider,
+  type AvailableSkill,
   type Memory,
   type MemorySearchResult,
 } from "@/lib/volund-api";
@@ -25,8 +27,205 @@ import {
   Search,
   RefreshCw,
   Clock,
+  Link2,
+  Check,
+  ExternalLink,
+  Loader2,
+  Mail,
+  Puzzle,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// ── Skills Tab ──────────────────────────────────────────────────────────────
+
+function SkillsTab() {
+  const [skills, setSkills] = useState<AvailableSkill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setSkills(await api.listAvailableSkills()); } catch { /* */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleToggle = async (skill: AvailableSkill) => {
+    setToggling(skill.id);
+    try {
+      if (skill.enabled) {
+        await api.disableSkill(skill.id);
+      } else {
+        await api.enableSkill(skill.id);
+      }
+      load();
+    } catch { /* */ }
+    finally { setToggling(null); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Enable skills to give your agent new capabilities
+        </p>
+        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+          <RefreshCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} /> Refresh
+        </Button>
+      </div>
+
+      {loading && Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
+
+      {skills.map((sk) => {
+        const isToggling = toggling === sk.id;
+        return (
+          <div key={sk.id} className="flex items-center gap-4 border rounded-lg px-4 py-4">
+            <Puzzle className="h-8 w-8 text-muted-foreground shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{sk.name}</p>
+                <span className="text-xs bg-secondary px-1.5 py-0.5 rounded">{sk.type}</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">{sk.description}</p>
+              {sk.required_providers.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Requires: {sk.required_providers.join(", ")}
+                </p>
+              )}
+            </div>
+            <Button
+              variant={sk.enabled ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleToggle(sk)}
+              disabled={isToggling}
+            >
+              {isToggling ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : sk.enabled ? (
+                <><ToggleRight className="h-4 w-4 mr-1.5" /> Enabled</>
+              ) : (
+                <><ToggleLeft className="h-4 w-4 mr-1.5" /> Disabled</>
+              )}
+            </Button>
+          </div>
+        );
+      })}
+
+      {!loading && skills.length === 0 && (
+        <div className="text-center py-10 text-muted-foreground">
+          <Puzzle className="h-8 w-8 mx-auto mb-2 opacity-40" />
+          <p className="text-sm">No skills installed</p>
+          <p className="text-xs mt-1">Ask your admin to install skills from The Forge</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Connections Tab ──────────────────────────────────────────────────────────
+
+const categoryIcon = (_cat: string) => Mail; // extend later per category
+
+function ConnectionsTab() {
+  const [providers, setProviders] = useState<ConnectionProvider[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setProviders(await api.listConnections()); } catch { /* */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleConnect = async (provider: ConnectionProvider) => {
+    setConnecting(provider.id);
+    try {
+      const authUrl = await api.getConnectUrl(provider.id);
+      // Open the OAuth consent screen in the system browser.
+      window.open(authUrl, "_blank");
+    } catch {
+      /* */
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handleDisconnect = async (providerId: string) => {
+    try {
+      await api.deleteCredential(providerId);
+      load();
+    } catch { /* */ }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Connect external accounts for your agent to use
+        </p>
+        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+          <RefreshCw className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")} /> Refresh
+        </Button>
+      </div>
+
+      {loading && Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
+
+      {providers.map((p) => {
+        const Icon = categoryIcon(p.category);
+        const isConnecting = connecting === p.id;
+        return (
+          <div
+            key={p.id}
+            className="flex items-center gap-4 border rounded-lg px-4 py-4"
+          >
+            {p.icon_url ? (
+              <img src={p.icon_url} alt="" className="h-8 w-8 rounded" />
+            ) : (
+              <Icon className="h-8 w-8 text-muted-foreground" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">{p.display_name}</p>
+              <p className="text-xs text-muted-foreground">
+                {p.category} &middot; {p.scopes.length} scope{p.scopes.length !== 1 && "s"}
+              </p>
+            </div>
+            {p.connected ? (
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1 text-xs text-green-500 font-medium">
+                  <Check className="h-3.5 w-3.5" /> Connected
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => handleDisconnect(p.id)}>
+                  Disconnect
+                </Button>
+              </div>
+            ) : (
+              <Button size="sm" onClick={() => handleConnect(p)} disabled={isConnecting}>
+                {isConnecting ? (
+                  <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> Connecting...</>
+                ) : (
+                  <><ExternalLink className="h-4 w-4 mr-1.5" /> Connect</>
+                )}
+              </Button>
+            )}
+          </div>
+        );
+      })}
+
+      {!loading && providers.length === 0 && (
+        <div className="text-center py-10 text-muted-foreground">
+          <Link2 className="h-8 w-8 mx-auto mb-2 opacity-40" />
+          <p className="text-sm">No providers available</p>
+          <p className="text-xs mt-1">Install a skill that requires external connections</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Credentials Tab ─────────────────────────────────────────────────────────
 
@@ -305,9 +504,11 @@ function AuditTab() {
 // ── Settings Page ───────────────────────────────────────────────────────────
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<"credentials" | "memory" | "audit">("credentials");
+  const [tab, setTab] = useState<"skills" | "connections" | "credentials" | "memory" | "audit">("skills");
 
   const tabs = [
+    { key: "skills" as const, label: "Skills", icon: Puzzle },
+    { key: "connections" as const, label: "Connections", icon: Link2 },
     { key: "credentials" as const, label: "Credentials", icon: KeyRound },
     { key: "memory" as const, label: "Memory", icon: Brain },
     { key: "audit" as const, label: "Audit Log", icon: Shield },
@@ -337,6 +538,8 @@ export function SettingsPage() {
       </div>
 
       <ScrollArea className="flex-1">
+        {tab === "skills" && <SkillsTab />}
+        {tab === "connections" && <ConnectionsTab />}
         {tab === "credentials" && <CredentialsTab />}
         {tab === "memory" && <MemoryTab />}
         {tab === "audit" && <AuditTab />}

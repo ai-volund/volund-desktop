@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { api, type ForgeSkill } from "@/lib/volund-api";
+import { api, type ForgeSkill, type AvailableSkill } from "@/lib/volund-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,8 @@ import {
   FileText,
   Terminal,
   Plug,
+  Check,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,7 +37,7 @@ const typeColor = {
   cli: "bg-orange-500/10 text-orange-500",
 } as const;
 
-function SkillCard({ skill, onClick }: { skill: ForgeSkill; onClick: () => void }) {
+function SkillCard({ skill, installed, onClick }: { skill: ForgeSkill; installed?: AvailableSkill; onClick: () => void }) {
   const Icon = typeIcon[skill.type] ?? FileText;
   const color = typeColor[skill.type] ?? typeColor.prompt;
 
@@ -44,10 +46,18 @@ function SkillCard({ skill, onClick }: { skill: ForgeSkill; onClick: () => void 
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">{skill.name}</CardTitle>
-          <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full", color)}>
-            <Icon className="h-3 w-3" />
-            {skill.type}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {installed?.enabled && (
+              <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-500">
+                <Check className="h-3 w-3" />
+                Enabled
+              </span>
+            )}
+            <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full", color)}>
+              <Icon className="h-3 w-3" />
+              {skill.type}
+            </span>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">
           v{skill.version} by {skill.author}
@@ -76,9 +86,63 @@ function SkillCard({ skill, onClick }: { skill: ForgeSkill; onClick: () => void 
   );
 }
 
-function SkillDetail({ skill, onClose }: { skill: ForgeSkill; onClose: () => void }) {
+function SkillDetail({
+  skill,
+  onClose,
+  installed,
+  onInstalled,
+}: {
+  skill: ForgeSkill;
+  onClose: () => void;
+  installed: AvailableSkill | undefined;
+  onInstalled: () => void;
+}) {
   const Icon = typeIcon[skill.type] ?? FileText;
   const color = typeColor[skill.type] ?? typeColor.prompt;
+  const [installing, setInstalling] = useState(false);
+
+  const isInstalled = !!installed;
+  const isEnabled = installed?.enabled ?? false;
+
+  const handleInstallAndEnable = async () => {
+    setInstalling(true);
+    try {
+      // Step 1: Install for tenant (admin action).
+      await api.installSkill(skill.name);
+      // Step 2: Enable for the current user.
+      await api.enableSkill(skill.name);
+      onInstalled();
+    } catch {
+      // If install succeeds but enable fails, still refresh.
+      onInstalled();
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const handleEnable = async () => {
+    setInstalling(true);
+    try {
+      await api.enableSkill(skill.name);
+      onInstalled();
+    } catch {
+      // ignore
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const handleUninstall = async () => {
+    setInstalling(true);
+    try {
+      await api.uninstallSkill(skill.name);
+      onInstalled();
+    } catch {
+      // ignore
+    } finally {
+      setInstalling(false);
+    }
+  };
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -135,6 +199,46 @@ function SkillDetail({ skill, onClose }: { skill: ForgeSkill; onClose: () => voi
               </div>
             </div>
           )}
+
+          {/* Install / Enable actions */}
+          <Separator />
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              {isEnabled
+                ? "Installed and enabled for your account"
+                : isInstalled
+                ? "Installed but not enabled for your account"
+                : "Not installed"}
+            </div>
+            <div className="flex gap-2">
+              {isEnabled ? (
+                <>
+                  <span className="inline-flex items-center gap-1 text-sm text-green-500 font-medium">
+                    <Check className="h-4 w-4" />
+                    Enabled
+                  </span>
+                  <Button variant="outline" size="sm" disabled={installing} onClick={handleUninstall}>
+                    {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Uninstall"}
+                  </Button>
+                </>
+              ) : isInstalled ? (
+                <>
+                  <Button size="sm" disabled={installing} onClick={handleEnable}>
+                    {installing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                    Enable
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={installing} onClick={handleUninstall}>
+                    Uninstall
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" disabled={installing} onClick={handleInstallAndEnable}>
+                  {installing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
+                  Install & Enable
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -143,10 +247,19 @@ function SkillDetail({ skill, onClose }: { skill: ForgeSkill; onClose: () => voi
 
 export function ForgePage() {
   const [skills, setSkills] = useState<ForgeSkill[]>([]);
+  const [installedSkills, setInstalledSkills] = useState<AvailableSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [selected, setSelected] = useState<ForgeSkill | null>(null);
+
+  const loadInstalled = useCallback(async () => {
+    try {
+      setInstalledSkills(await api.listAvailableSkills());
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,7 +275,7 @@ export function ForgePage() {
     }
   }, [query, typeFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); loadInstalled(); }, [load, loadInstalled]);
 
   const handleSelectSkill = async (skill: ForgeSkill) => {
     try {
@@ -172,6 +285,9 @@ export function ForgePage() {
       setSelected(skill);
     }
   };
+
+  const findInstalled = (name: string) =>
+    installedSkills.find((s) => s.name === name);
 
   return (
     <main className="flex-1 flex flex-col p-6 gap-6">
@@ -216,7 +332,7 @@ export function ForgePage() {
           )}
 
           {skills.map((skill) => (
-            <SkillCard key={skill.name} skill={skill} onClick={() => handleSelectSkill(skill)} />
+            <SkillCard key={skill.name} skill={skill} installed={findInstalled(skill.name)} onClick={() => handleSelectSkill(skill)} />
           ))}
         </div>
 
@@ -229,7 +345,14 @@ export function ForgePage() {
         )}
       </ScrollArea>
 
-      {selected && <SkillDetail skill={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <SkillDetail
+          skill={selected}
+          onClose={() => setSelected(null)}
+          installed={findInstalled(selected.name)}
+          onInstalled={() => { loadInstalled(); }}
+        />
+      )}
     </main>
   );
 }
