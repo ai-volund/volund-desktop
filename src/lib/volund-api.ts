@@ -36,6 +36,23 @@ export interface Message {
 export interface ContentBlock {
   type: string;
   text?: string;
+  // attachment fields
+  attachment_id?: string;
+  url?: string;
+  file_name?: string;
+  mime_type?: string;
+  size?: number;
+}
+
+export interface Attachment {
+  id: string;
+  conversation_id: string;
+  user_id?: string;
+  file_name: string;
+  mime_type: string;
+  size: number;
+  url?: string;
+  created_at: string;
 }
 
 // ── Tasks ──────────────────────────────────────────────────────────────────────
@@ -287,15 +304,58 @@ class VolundAPI {
     return res.json();
   }
 
-  async sendMessage(conversationId: string, text: string): Promise<Message> {
+  async uploadAttachment(conversationId: string, file: File): Promise<Attachment> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(
+      `${BASE_URL}/v1/conversations/${conversationId}/attachments`,
+      {
+        method: "POST",
+        headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+        body: formData,
+      }
+    );
+    if (!res.ok) throw new Error("Failed to upload attachment");
+    return res.json();
+  }
+
+  async listAttachments(conversationId: string): Promise<Attachment[]> {
+    const res = await fetch(
+      `${BASE_URL}/v1/conversations/${conversationId}/attachments`,
+      { headers: this.headers() }
+    );
+    if (!res.ok) throw new Error("Failed to list attachments");
+    const data = await res.json();
+    return data.attachments ?? [];
+  }
+
+  async sendMessage(
+    conversationId: string,
+    text: string,
+    attachments?: Attachment[]
+  ): Promise<Message> {
+    const content: ContentBlock[] = [];
+    if (text) {
+      content.push({ type: "text", text });
+    }
+    if (attachments) {
+      for (const att of attachments) {
+        content.push({
+          type: "attachment",
+          attachment_id: att.id,
+          url: att.url,
+          file_name: att.file_name,
+          mime_type: att.mime_type,
+          size: att.size,
+        });
+      }
+    }
     const res = await fetch(
       `${BASE_URL}/v1/conversations/${conversationId}/messages`,
       {
         method: "POST",
         headers: this.headers(),
-        body: JSON.stringify({
-          content: [{ type: "text", text }],
-        }),
+        body: JSON.stringify({ content }),
       }
     );
     if (!res.ok) throw new Error("Failed to send message");

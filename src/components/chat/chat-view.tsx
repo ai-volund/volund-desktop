@@ -10,9 +10,10 @@ import { Loader2 } from "lucide-react";
 
 interface ChatViewProps {
   conversationId: string;
+  onTitleGenerated?: (conversationId: string, title: string) => void;
 }
 
-export function ChatView({ conversationId }: ChatViewProps) {
+export function ChatView({ conversationId, onTitleGenerated }: ChatViewProps) {
   const transport = useMemo(
     () => new WebSocketChatTransport(conversationId),
     [conversationId]
@@ -25,6 +26,45 @@ export function ChatView({ conversationId }: ChatViewProps) {
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const titleGenerated = useRef(false);
+
+  // Auto-generate title from first user message after first assistant response.
+  useEffect(() => {
+    if (titleGenerated.current) return;
+    if (status !== "ready") return;
+
+    const userMsg = messages.find((m) => m.role === "user");
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    if (!userMsg || !assistantMsg) return;
+
+    titleGenerated.current = true;
+    const firstText = userMsg.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join(" ")
+      .trim();
+
+    if (!firstText) return;
+
+    // Truncate to a clean title: first sentence or first 60 chars.
+    const periodIdx = firstText.indexOf(".");
+    const questionIdx = firstText.indexOf("?");
+    const cutoff = [periodIdx, questionIdx].filter((i) => i > 0 && i < 60);
+    const maxLen = cutoff.length > 0 ? Math.min(...cutoff) + 1 : Math.min(firstText.length, 60);
+    let title = firstText.slice(0, maxLen).trim();
+    if (title.length < firstText.length && !title.endsWith(".") && !title.endsWith("?")) {
+      title += "...";
+    }
+
+    api.updateConversation(conversationId, title).then(() => {
+      onTitleGenerated?.(conversationId, title);
+    }).catch(() => { /* ignore */ });
+  }, [status, messages, conversationId, onTitleGenerated]);
+
+  // Reset title generation flag when conversation changes.
+  useEffect(() => {
+    titleGenerated.current = false;
+  }, [conversationId]);
 
   // Load existing messages from the REST API on mount.
   useEffect(() => {
@@ -32,17 +72,16 @@ export function ChatView({ conversationId }: ChatViewProps) {
     api
       .getConversation(conversationId)
       .then((convo) => {
+        // If the conversation already has a custom title, skip auto-generation.
+        if (convo.title && convo.title !== "New conversation") {
+          titleGenerated.current = true;
+        }
         if (convo.messages && convo.messages.length > 0) {
           setMessages(
             convo.messages.map((m) => ({
               id: m.id,
               role: m.role as "user" | "assistant",
-              parts: [
-                {
-                  type: "text" as const,
-                  text: extractText(m.content),
-                },
-              ],
+              parts: extractParts(m.content),
               createdAt: new Date(m.created_at),
             }))
           );
@@ -59,8 +98,24 @@ export function ChatView({ conversationId }: ChatViewProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async (text: string) => {
-    await sendMessage({ text });
+  const handleSend = async (text: string, files?: File[]) => {
+    // Upload files first, then send message with attachment references.
+    if (files && files.length > 0) {
+      try {
+        const attachments = await Promise.all(
+          files.map((f) => api.uploadAttachment(conversationId, f))
+        );
+        // Build content blocks: text + attachment references.
+        await api.sendMessage(conversationId, text, attachments);
+        // Also send via WebSocket transport for streaming response.
+        await sendMessage({ text });
+      } catch {
+        // Fall back to text-only if upload fails.
+        if (text) await sendMessage({ text });
+      }
+    } else {
+      await sendMessage({ text });
+    }
   };
 
   const isStreaming = status === "streaming" || status === "submitted";
@@ -119,15 +174,40 @@ export function ChatView({ conversationId }: ChatViewProps) {
   );
 }
 
-function extractText(
-  content: Array<{ type?: string; text?: string }> | string
-): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
-      .join("\n");
+function extractParts(
+  content: Array<Record<string, unknown>> | string
+): Array<{ type: "text"; text: string } | { type: string; [key: string]: unknown }> {
+  if (typeof content === "string") {
+    return [{ type: "text" as const, text: content }];
   }
-  return String(content);
+  if (!Array.isArray(content)) {
+    return [{ type: "text" as const, text: String(content) }];
+  }
+
+  const parts: Array<{ type: "text"; text: string } | { type: string; [key: string]: unknown }> = [];
+
+  for (const block of content) {
+    if (block.type === "attachment") {
+      parts.push({
+        type: "attachment",
+        file_name: block.file_name,
+        mime_type: block.mime_type,
+        url: block.url,
+        size: block.size,
+        attachment_id: block.attachment_id,
+      });
+    } else if (block.type === "text") {
+      const text = (block.text ?? "") as string;
+      if (text) parts.push({ type: "text" as const, text });
+    } else {
+      // Unknown block type — render as text fallback.
+      const text = (block.text ?? "") as string;
+      if (text) parts.push({ type: "text" as const, text });
+    }
+  }
+
+  if (parts.length === 0) {
+    parts.push({ type: "text" as const, text: "" });
+  }
+  return parts;
 }

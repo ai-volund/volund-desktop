@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -19,7 +19,11 @@ interface SidebarProps {
   onTitleChange?: (id: string, title: string) => void;
 }
 
-export function Sidebar({ activeId, onSelect, onTitleChange }: SidebarProps) {
+export interface SidebarHandle {
+  updateTitle: (id: string, title: string) => void;
+}
+
+export const Sidebar = forwardRef<SidebarHandle, SidebarProps>(function Sidebar({ activeId, onSelect, onTitleChange }, ref) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -40,6 +44,14 @@ export function Sidebar({ activeId, onSelect, onTitleChange }: SidebarProps) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useImperativeHandle(ref, () => ({
+    updateTitle: (id: string, title: string) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title } : c))
+      );
+    },
+  }));
 
   const createNew = async () => {
     try {
@@ -176,4 +188,4 @@ export function Sidebar({ activeId, onSelect, onTitleChange }: SidebarProps) {
       </ScrollArea>
     </div>
   );
-}
+});
