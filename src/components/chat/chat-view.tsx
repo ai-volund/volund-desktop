@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,8 +25,21 @@ export function ChatView({ conversationId, onTitleGenerated }: ChatViewProps) {
   });
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const titleGenerated = useRef(false);
+
+  // Track whether the user has scrolled away from the bottom.
+  const handleScroll = useCallback(() => {
+    const viewport = scrollAreaRef.current?.querySelector(
+      "[data-slot='scroll-area-viewport']"
+    ) as HTMLElement | null;
+    if (!viewport) return;
+    const { scrollTop, scrollHeight, clientHeight } = viewport;
+    // Consider "near bottom" if within 120px of the end.
+    userScrolledUp.current = scrollHeight - scrollTop - clientHeight > 120;
+  }, []);
 
   // Auto-generate title from first user message after first assistant response.
   useEffect(() => {
@@ -93,10 +106,33 @@ export function ChatView({ conversationId, onTitleGenerated }: ChatViewProps) {
       .finally(() => setHistoryLoading(false));
   }, [conversationId, setMessages]);
 
-  // Auto-scroll to bottom on new messages.
+  const isStreaming = status === "streaming" || status === "submitted";
+
+  // Attach scroll listener to the viewport.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const viewport = scrollAreaRef.current?.querySelector(
+      "[data-slot='scroll-area-viewport']"
+    ) as HTMLElement | null;
+    if (!viewport) return;
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", handleScroll);
+  }, [handleScroll]);
+
+  // Auto-scroll: instant during streaming (no jank), smooth on new messages.
+  useEffect(() => {
+    if (userScrolledUp.current) return;
+    const viewport = scrollAreaRef.current?.querySelector(
+      "[data-slot='scroll-area-viewport']"
+    ) as HTMLElement | null;
+    if (!viewport) return;
+
+    if (isStreaming) {
+      // Instant scroll during streaming — prevents the "jumping" effect.
+      viewport.scrollTop = viewport.scrollHeight;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, isStreaming]);
 
   const handleSend = async (text: string, files?: File[]) => {
     // Upload files first, then send message with attachment references.
@@ -118,11 +154,10 @@ export function ChatView({ conversationId, onTitleGenerated }: ChatViewProps) {
     }
   };
 
-  const isStreaming = status === "streaming" || status === "submitted";
-
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <ScrollArea className="flex-1 px-4">
+      <div ref={scrollAreaRef} className="flex-1 min-h-0">
+      <ScrollArea className="h-full px-4">
         {historyLoading && messages.length === 0 && (
           <div className="space-y-6 py-6">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -162,6 +197,7 @@ export function ChatView({ conversationId, onTitleGenerated }: ChatViewProps) {
         )}
         <div ref={bottomRef} />
       </ScrollArea>
+      </div>
 
       <ChatInput
         onSend={handleSend}

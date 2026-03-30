@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import {
   Code,
   Globe,
+  Mail,
   Search,
   ExternalLink,
   Terminal,
@@ -187,6 +188,64 @@ function TaskDelegationRenderer({ output, args }: { output: string; args?: strin
   );
 }
 
+// ── Web read result ───────────────────────────────────────────────────────
+
+function WebReadRenderer({ output }: { output: string }) {
+  // Handle plain-text error strings (not JSON).
+  let data: { title?: string; url?: string; content?: string } = {};
+  try {
+    data = JSON.parse(output);
+  } catch {
+    // Non-JSON output — show as plain text (likely an error message from Jina).
+    if (output && output.trim()) {
+      return (
+        <div className="space-y-2">
+          <pre className="text-xs whitespace-pre-wrap font-mono rounded-md bg-muted px-3 py-2 max-h-64 overflow-auto text-muted-foreground">
+            {output.length > 600 ? output.slice(0, 600) + "…" : output}
+          </pre>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  // Show title + URL even when content is empty.
+  const hasContent = data.content && data.content.trim().length > 0;
+  const preview = hasContent
+    ? data.content!.length > 600
+      ? data.content!.slice(0, 600) + "…"
+      : data.content!
+    : null;
+
+  return (
+    <div className="space-y-2">
+      {data.title && (
+        <div className="flex items-center gap-1.5">
+          <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-sm font-medium truncate">{data.title}</span>
+        </div>
+      )}
+      {data.url && (
+        <a
+          href={data.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-muted-foreground/60 hover:text-primary truncate block"
+        >
+          {data.url}
+        </a>
+      )}
+      {preview ? (
+        <pre className="text-xs whitespace-pre-wrap font-mono rounded-md bg-zinc-950 text-zinc-100 dark:bg-zinc-900 px-3 py-2 max-h-64 overflow-auto">
+          {preview}
+        </pre>
+      ) : (
+        <p className="text-xs text-muted-foreground italic">No readable content extracted from this page.</p>
+      )}
+    </div>
+  );
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -209,8 +268,13 @@ export function renderToolOutput(
     return <CodeResultRenderer output={outputStr} args={args} />;
   }
 
-  if (name.includes("web_search") || name.includes("search")) {
+  if (name.includes("web_search") || name === "search") {
     const rendered = <WebSearchRenderer output={outputStr} />;
+    if (rendered) return rendered;
+  }
+
+  if (name === "web_read") {
+    const rendered = <WebReadRenderer output={outputStr} />;
     if (rendered) return rendered;
   }
 
@@ -237,11 +301,19 @@ export function toolMeta(toolName: string): { icon: React.ReactNode; label: stri
   if (name.includes("run_code") || name.includes("execute") || name.includes("shell")) {
     return { icon: <Code className="h-3.5 w-3.5" />, label: "Code Execution" };
   }
-  if (name.includes("web_search") || name.includes("search")) {
+  if (name.includes("email")) {
+    const action = name.replace("email_", "");
+    const label = "Email " + action.charAt(0).toUpperCase() + action.slice(1);
+    return { icon: <Mail className="h-3.5 w-3.5" />, label };
+  }
+  if (name.includes("web_search") || name === "search") {
     return { icon: <Search className="h-3.5 w-3.5" />, label: "Web Search" };
   }
   if (name.includes("memory") || name.includes("retrieve") || name.includes("recall")) {
     return { icon: <Brain className="h-3.5 w-3.5" />, label: "Memory" };
+  }
+  if (name === "web_read") {
+    return { icon: <Globe className="h-3.5 w-3.5" />, label: "Web Read" };
   }
   if (name.includes("read") || name.includes("file")) {
     return { icon: <BookOpen className="h-3.5 w-3.5" />, label: "File Read" };

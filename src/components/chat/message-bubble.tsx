@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import Markdown from "react-markdown";
@@ -7,110 +6,16 @@ import {
   Bot,
   User,
   Loader2,
-  Wrench,
-  CheckCircle2,
-  XCircle,
-  ChevronDown,
-  ChevronRight,
   FileText,
   Image as ImageIcon,
   Download,
 } from "lucide-react";
 import type { UIMessage } from "ai";
-import { renderToolOutput, toolMeta } from "./tool-renderers";
+import { ToolCallBlock } from "./tool-call";
 
 interface MessageBubbleProps {
   message: UIMessage;
   isStreaming?: boolean;
-}
-
-function ToolCallBlock({ part }: { part: Record<string, unknown> }) {
-  const [expanded, setExpanded] = useState(false);
-  const toolName = (part.toolName ?? part.toolCallId ?? "tool") as string;
-  const state = part.state as string | undefined;
-  const output = part.output;
-  const args = part.args as string | undefined;
-  const errorText = part.errorText as string | undefined;
-
-  const isRunning = state === "input-streaming" || state === "call" || state === "partial-call";
-  const isDone = state === "result";
-  const isFailed = !!errorText;
-
-  const statusColor = isFailed
-    ? "border-destructive/30 bg-destructive/5"
-    : isDone
-      ? "border-green-500/30 bg-green-500/5"
-      : isRunning
-        ? "border-blue-500/30 bg-blue-500/5"
-        : "border-border bg-muted/50";
-
-  const hasDetails = output != null || errorText;
-  const { icon: toolIcon, label: toolLabel } = toolMeta(toolName);
-
-  // Try rich rendering for the output.
-  const richOutput = isDone && output != null
-    ? renderToolOutput(toolName, output, args)
-    : null;
-
-  return (
-    <div className={cn("rounded-lg border text-sm", statusColor)}>
-      <button
-        onClick={() => hasDetails && setExpanded(!expanded)}
-        className={cn(
-          "flex items-center gap-2 px-3 py-2 w-full text-left",
-          hasDetails && "cursor-pointer hover:bg-muted/30 transition-colors"
-        )}
-      >
-        {isRunning ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 shrink-0" />
-        ) : isFailed ? (
-          <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
-        ) : isDone ? (
-          <span className="text-green-500 shrink-0">
-            {toolIcon ?? <CheckCircle2 className="h-3.5 w-3.5" />}
-          </span>
-        ) : (
-          <span className="text-muted-foreground shrink-0">
-            {toolIcon ?? <Wrench className="h-3.5 w-3.5" />}
-          </span>
-        )}
-        <span className="font-medium text-foreground">{toolLabel}</span>
-        {isRunning && (
-          <span className="text-xs text-blue-500 animate-pulse">Running...</span>
-        )}
-        {isDone && !isFailed && !isRunning && (
-          <span className="text-xs text-green-500/60">Done</span>
-        )}
-        {hasDetails && (
-          <span className="ml-auto">
-            {expanded ? (
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-          </span>
-        )}
-      </button>
-      {expanded && hasDetails && (
-        <div className="border-t px-3 py-2 space-y-1.5">
-          {errorText && (
-            <pre className="text-xs text-destructive whitespace-pre-wrap font-mono">
-              {errorText}
-            </pre>
-          )}
-          {richOutput ?? (
-            output != null && (
-              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-48 overflow-auto">
-                {typeof output === "string"
-                  ? output
-                  : JSON.stringify(output, null, 2)}
-              </pre>
-            )
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function AttachmentBlock({ part }: { part: Record<string, unknown> }) {
