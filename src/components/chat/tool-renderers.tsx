@@ -158,7 +158,7 @@ function MemoryRenderer({ output }: { output: string }) {
 
 // ── Task delegation ────────────────────────────────────────────────────────
 
-function TaskDelegationRenderer({ output, args }: { output: string; args?: string }) {
+function TaskDelegationRenderer({ output, args: _args }: { output: string; args?: string }) {
   let taskInfo: { task_id?: string; status?: string; result?: string } = {};
   try {
     taskInfo = JSON.parse(output);

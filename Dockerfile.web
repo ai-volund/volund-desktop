@@ -6,7 +6,7 @@ COPY . .
 # Auth and API calls go through nginx proxy (same origin)
 ENV VITE_AUTH_URL=""
 ENV VITE_GATEWAY_URL=""
-RUN npm run build
+RUN npx vite build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html

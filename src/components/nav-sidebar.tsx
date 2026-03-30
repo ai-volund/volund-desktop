@@ -65,7 +65,7 @@ export function NavSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { data: session } = useSession();
-  const { theme, setTheme } = useTheme();
+  const { setTheme } = useTheme();
   const user = session?.user;
 
   return (
