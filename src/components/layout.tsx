@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { NavSidebar } from "@/components/nav-sidebar";
 import { useTheme } from "@/lib/use-theme";
+import { signOut } from "@/lib/auth-client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,11 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sun, Moon, Monitor, LogOut } from "lucide-react";
 
-interface LayoutProps {
-  onLogout?: () => void;
-}
-
-export function Layout({ onLogout }: LayoutProps) {
+export function Layout() {
   const { theme, setTheme } = useTheme();
 
   return (
@@ -42,14 +39,10 @@ export function Layout({ onLogout }: LayoutProps) {
               <DropdownMenuItem onClick={() => setTheme("system")}>
                 <Monitor className="h-4 w-4 mr-2" /> System
               </DropdownMenuItem>
-              {onLogout && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={onLogout}>
-                    <LogOut className="h-4 w-4 mr-2" /> Sign out
-                  </DropdownMenuItem>
-                </>
-              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => signOut()}>
+                <LogOut className="h-4 w-4 mr-2" /> Sign out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -173,136 +173,55 @@ export interface OIDCProvider {
 }
 
 class VolundAPI {
-  private token: string | null = null;
-  private refreshToken: string | null = null;
-  private expiresAt: number = 0;
-  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private jwt: string | null = null;
+  private jwtExpiry = 0;
+  private authUrl: string;
 
   constructor() {
-    // Restore session from localStorage.
-    const saved = localStorage.getItem("volund_auth");
-    if (saved) {
-      try {
-        const { token, refreshToken, expiresAt } = JSON.parse(saved);
-        this.token = token;
-        this.refreshToken = refreshToken;
-        this.expiresAt = expiresAt;
-        this.scheduleRefresh();
-      } catch {
-        localStorage.removeItem("volund_auth");
-      }
-    }
+    this.authUrl = "http://localhost:3456";
   }
 
-  private persistAuth(accessToken: string, refreshTk: string, expiresAt: string) {
-    this.token = accessToken;
-    this.refreshToken = refreshTk;
-    this.expiresAt = new Date(expiresAt).getTime();
-    localStorage.setItem(
-      "volund_auth",
-      JSON.stringify({ token: this.token, refreshToken: this.refreshToken, expiresAt: this.expiresAt })
-    );
-    this.scheduleRefresh();
-  }
-
-  private scheduleRefresh() {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    // Refresh 60s before expiry.
-    const delay = Math.max(this.expiresAt - Date.now() - 60_000, 5_000);
-    this.refreshTimer = setTimeout(() => this.autoRefresh(), delay);
-  }
-
-  private async autoRefresh() {
-    if (!this.refreshToken) return;
-    try {
-      const res = await fetch(`${BASE_URL}/v1/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: this.refreshToken }),
-      });
-      if (!res.ok) {
-        this.logout();
-        return;
-      }
-      const data: AuthResponse = await res.json();
-      this.persistAuth(data.access_token, data.refresh_token, data.expires_at);
-    } catch {
-      // Network error — will retry on next API call.
-    }
-  }
-
-  setToken(token: string) {
-    this.token = token;
-  }
-
-  getToken() {
-    return this.token;
-  }
-
-  logout() {
-    this.token = null;
-    this.refreshToken = null;
-    this.expiresAt = 0;
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    localStorage.removeItem("volund_auth");
-  }
-
-  private headers(): HeadersInit {
-    const h: HeadersInit = { "Content-Type": "application/json" };
-    if (this.token) h["Authorization"] = `Bearer ${this.token}`;
-    return h;
-  }
-
-  async login(email: string, password: string): Promise<AuthResponse> {
-    const res = await fetch(`${BASE_URL}/v1/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+  /**
+   * Fetch a fresh JWT from better-auth using the session cookie.
+   * This replaces the old manual JWT management.
+   */
+  private async refreshJWT(): Promise<string> {
+    const res = await fetch(`${this.authUrl}/api/auth/token`, {
+      credentials: "include",
     });
-    if (!res.ok) throw new Error("Login failed");
-    const data: AuthResponse = await res.json();
-    this.persistAuth(data.access_token, data.refresh_token, data.expires_at);
-    return data;
-  }
-
-  async register(
-    email: string,
-    password: string,
-    displayName: string,
-    orgName: string
-  ): Promise<AuthResponse> {
-    const res = await fetch(`${BASE_URL}/v1/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email,
-        password,
-        display_name: displayName,
-        org_name: orgName,
-      }),
-    });
-    if (!res.ok) throw new Error("Registration failed");
-    const data: AuthResponse = await res.json();
-    this.persistAuth(data.access_token, data.refresh_token, data.expires_at);
-    return data;
-  }
-
-  // Fetch available OIDC providers from the backend.
-  async getOIDCProviders(): Promise<OIDCProvider[]> {
-    const res = await fetch(`${BASE_URL}/v1/auth/oidc/providers`);
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error("Not authenticated");
     const data = await res.json();
-    return data.providers ?? [];
+    this.jwt = data.token;
+    // JWT expires in 15m, refresh at 12m
+    this.jwtExpiry = Date.now() + 12 * 60 * 1000;
+    return this.jwt!;
   }
 
-  // Get the OIDC redirect URL for a provider.
-  oidcRedirectUrl(provider: string): string {
-    return `${BASE_URL}/v1/auth/oidc/${provider}`;
+  /** Check if we have a valid JWT (doesn't guarantee session is active). */
+  getToken() {
+    return this.jwt;
+  }
+
+  /** Clear local JWT cache (session is managed by better-auth). */
+  logout() {
+    this.jwt = null;
+    this.jwtExpiry = 0;
+  }
+
+  private async headers(): Promise<HeadersInit> {
+    // Get or refresh the JWT
+    if (!this.jwt || Date.now() >= this.jwtExpiry) {
+      await this.refreshJWT();
+    }
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.jwt}`,
+    };
   }
 
   async listConversations(): Promise<Conversation[]> {
     const res = await fetch(`${BASE_URL}/v1/conversations`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list conversations");
     const data = await res.json();
@@ -311,7 +230,7 @@ class VolundAPI {
 
   async getConversation(id: string): Promise<Conversation> {
     const res = await fetch(`${BASE_URL}/v1/conversations/${id}`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to get conversation");
     return res.json();
@@ -320,7 +239,7 @@ class VolundAPI {
   async createConversation(title: string): Promise<Conversation> {
     const res = await fetch(`${BASE_URL}/v1/conversations`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify({ title }),
     });
     if (!res.ok) throw new Error("Failed to create conversation");
@@ -334,7 +253,7 @@ class VolundAPI {
       `${BASE_URL}/v1/conversations/${conversationId}/attachments`,
       {
         method: "POST",
-        headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+        headers: this.jwt ? { Authorization: `Bearer ${this.jwt}` } : {},
         body: formData,
       }
     );
@@ -345,7 +264,7 @@ class VolundAPI {
   async listAttachments(conversationId: string): Promise<Attachment[]> {
     const res = await fetch(
       `${BASE_URL}/v1/conversations/${conversationId}/attachments`,
-      { headers: this.headers() }
+      { headers: await this.headers() }
     );
     if (!res.ok) throw new Error("Failed to list attachments");
     const data = await res.json();
@@ -377,7 +296,7 @@ class VolundAPI {
       `${BASE_URL}/v1/conversations/${conversationId}/messages`,
       {
         method: "POST",
-        headers: this.headers(),
+        headers: await this.headers(),
         body: JSON.stringify({ content }),
       }
     );
@@ -388,7 +307,7 @@ class VolundAPI {
   async updateConversation(id: string, title: string): Promise<Conversation> {
     const res = await fetch(`${BASE_URL}/v1/conversations/${id}`, {
       method: "PATCH",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify({ title }),
     });
     if (!res.ok) throw new Error("Failed to update conversation");
@@ -398,20 +317,20 @@ class VolundAPI {
   async deleteConversation(id: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/conversations/${id}`, {
       method: "DELETE",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to delete conversation");
   }
 
   wsUrl(conversationId: string): string {
-    return `ws://localhost:8080/ws/conv/${conversationId}?token=${this.token}`;
+    return `ws://localhost:8080/ws/conv/${conversationId}?token=${this.jwt}`;
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────────
 
   async listTasks(): Promise<Task[]> {
     const res = await fetch(`${BASE_URL}/v1/tasks`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list tasks");
     const data = await res.json();
@@ -420,7 +339,7 @@ class VolundAPI {
 
   async getTask(id: string): Promise<Task> {
     const res = await fetch(`${BASE_URL}/v1/tasks/${id}`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to get task");
     return res.json();
@@ -429,7 +348,7 @@ class VolundAPI {
   async cancelTask(id: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/tasks/${id}/cancel`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to cancel task");
   }
@@ -438,7 +357,7 @@ class VolundAPI {
 
   async listAgentProfiles(): Promise<AgentProfile[]> {
     const res = await fetch(`${BASE_URL}/v1/agents`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list agent profiles");
     const data = await res.json();
@@ -447,7 +366,7 @@ class VolundAPI {
 
   async getAgentProfile(id: string): Promise<AgentProfile> {
     const res = await fetch(`${BASE_URL}/v1/agents/${id}`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to get agent profile");
     return res.json();
@@ -465,7 +384,7 @@ class VolundAPI {
   }): Promise<AgentProfile> {
     const res = await fetch(`${BASE_URL}/v1/agents`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify(profile),
     });
     if (!res.ok) throw new Error("Failed to create agent profile");
@@ -478,7 +397,7 @@ class VolundAPI {
   ): Promise<AgentProfile> {
     const res = await fetch(`${BASE_URL}/v1/agents/${id}`, {
       method: "PUT",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify(updates),
     });
     if (!res.ok) throw new Error("Failed to update agent profile");
@@ -488,7 +407,7 @@ class VolundAPI {
   async deleteAgentProfile(id: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/agents/${id}`, {
       method: "DELETE",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to delete agent profile");
   }
@@ -507,7 +426,7 @@ class VolundAPI {
     if (params.tag) query.set("tag", params.tag);
     if (params.limit) query.set("limit", String(params.limit));
     const res = await fetch(`${BASE_URL}/v1/forge/skills?${query}`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to search forge skills");
     const data = await res.json();
@@ -516,7 +435,7 @@ class VolundAPI {
 
   async getForgeSkill(name: string): Promise<ForgeSkill> {
     const res = await fetch(`${BASE_URL}/v1/forge/skills/${name}`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to get forge skill");
     return res.json();
@@ -526,7 +445,7 @@ class VolundAPI {
 
   async listAvailableSkills(): Promise<AvailableSkill[]> {
     const res = await fetch(`${BASE_URL}/v1/skills`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list available skills");
     const data = await res.json();
@@ -536,7 +455,7 @@ class VolundAPI {
   async enableSkill(skillId: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/skills/${skillId}/enable`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to enable skill");
   }
@@ -544,7 +463,7 @@ class VolundAPI {
   async disableSkill(skillId: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/skills/${skillId}/enable`, {
       method: "DELETE",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to disable skill");
   }
@@ -552,7 +471,7 @@ class VolundAPI {
   async installSkill(skillId: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/admin/skills/${skillId}/install`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to install skill");
   }
@@ -560,7 +479,7 @@ class VolundAPI {
   async uninstallSkill(skillId: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/admin/skills/${skillId}/install`, {
       method: "DELETE",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to uninstall skill");
   }
@@ -569,7 +488,7 @@ class VolundAPI {
 
   async listConnections(): Promise<ConnectionProvider[]> {
     const res = await fetch(`${BASE_URL}/v1/connect`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list connections");
     const data = await res.json();
@@ -580,7 +499,7 @@ class VolundAPI {
    *  should open this in the system browser so the user can consent. */
   async getConnectUrl(provider: string): Promise<string> {
     const res = await fetch(`${BASE_URL}/v1/connect/${provider}?format=json`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to get connect URL");
     const data = await res.json();
@@ -591,7 +510,7 @@ class VolundAPI {
 
   async listCredentials(): Promise<ProviderCredential[]> {
     const res = await fetch(`${BASE_URL}/v1/credentials`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list credentials");
     const data = await res.json();
@@ -601,7 +520,7 @@ class VolundAPI {
   async storeCredential(provider: string, token: string, scopes: string[]): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/credentials`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify({ provider, token, scopes }),
     });
     if (!res.ok) throw new Error("Failed to store credential");
@@ -610,14 +529,14 @@ class VolundAPI {
   async deleteCredential(provider: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/credentials/${provider}`, {
       method: "DELETE",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to delete credential");
   }
 
   async listCredentialAudit(): Promise<CredentialAuditEntry[]> {
     const res = await fetch(`${BASE_URL}/v1/credentials/audit`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list credential audit");
     const data = await res.json();
@@ -628,7 +547,7 @@ class VolundAPI {
 
   async listMemories(): Promise<Memory[]> {
     const res = await fetch(`${BASE_URL}/v1/memory`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to list memories");
     const data = await res.json();
@@ -638,7 +557,7 @@ class VolundAPI {
   async storeMemory(content: string, metadata: Record<string, string>): Promise<Memory> {
     const res = await fetch(`${BASE_URL}/v1/memory`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify({ content, metadata }),
     });
     if (!res.ok) throw new Error("Failed to store memory");
@@ -648,7 +567,7 @@ class VolundAPI {
   async searchMemories(query: string, limit?: number): Promise<MemorySearchResult[]> {
     const res = await fetch(`${BASE_URL}/v1/memory/search`, {
       method: "POST",
-      headers: this.headers(),
+      headers: await this.headers(),
       body: JSON.stringify({ query, limit: limit ?? 10 }),
     });
     if (!res.ok) throw new Error("Failed to search memories");
@@ -659,7 +578,7 @@ class VolundAPI {
   async deleteMemory(id: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/memory/${id}`, {
       method: "DELETE",
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to delete memory");
   }
@@ -672,7 +591,7 @@ class VolundAPI {
     if (to) params.set("to", to);
     const qs = params.toString();
     const res = await fetch(`${BASE_URL}/v1/usage/summary${qs ? `?${qs}` : ""}`, {
-      headers: this.headers(),
+      headers: await this.headers(),
     });
     if (!res.ok) throw new Error("Failed to get usage summary");
     return res.json();
