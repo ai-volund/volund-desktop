@@ -3,6 +3,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# Auth and API calls go through nginx proxy (same origin)
+ENV VITE_AUTH_URL=""
+ENV VITE_GATEWAY_URL=""
 RUN npm run build
 
 FROM nginx:alpine

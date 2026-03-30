@@ -2,7 +2,7 @@
  * Volund API client — thin wrapper around the gateway REST API.
  */
 
-const BASE_URL = "http://localhost:8080";
+const BASE_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
 
 export interface AuthResponse {
   access_token: string;
