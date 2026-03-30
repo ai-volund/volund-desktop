@@ -3,18 +3,22 @@ import { cn } from "@/lib/utils";
 import {
   MessageSquare,
   ListTodo,
-  Bot,
-  Store,
-  BarChart3,
+  Box,
+  Boxes,
+  ToolCase,
+  Clock,
+  ChartColumn,
   Settings,
 } from "lucide-react";
 
 const navItems = [
   { to: "/chat", icon: MessageSquare, label: "Chat" },
   { to: "/tasks", icon: ListTodo, label: "Tasks" },
-  { to: "/agents", icon: Bot, label: "Agents" },
-  { to: "/forge", icon: Store, label: "Forge" },
-  { to: "/usage", icon: BarChart3, label: "Usage" },
+  { to: "/agents", icon: Box, label: "Agents" },
+  { to: "/teams", icon: Boxes, label: "Teams" },
+  { to: "/forge", icon: ToolCase, label: "Forge" },
+  { to: "/schedules", icon: Clock, label: "Schedules" },
+  { to: "/usage", icon: ChartColumn, label: "Usage" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
